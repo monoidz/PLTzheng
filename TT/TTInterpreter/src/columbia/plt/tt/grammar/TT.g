@@ -4,6 +4,7 @@ options {
 	language = Java;
 	output=AST;
 	ASTLabelType =  CommonTree;
+
 }
 tokens {
 	TUNIT;
@@ -13,6 +14,9 @@ tokens {
 	CALL;
 	SLIST;
 	EMPTY;
+	IDENT_TOKEN;
+	DATE_CONSTANT_TOKEN;
+	TIMEFRAME_CONSTANT;
 	MAIN = 'main';
 	STRINGTYPE = 'String';
 	NUMBERTYPE = 'Number';
@@ -21,6 +25,7 @@ tokens {
 	TIMEFRAMETYPE = 'TimeFrame';
 	CALENDARTYPE = 'Calendar';
 	TIMETYPE = 'Time';
+	BOOLEAN = 'Boolean';
 	IF = 'if';
 	ELSE = 'else';
 	EVERYDATE;
@@ -75,6 +80,8 @@ tokens {
 	DECLARE;
 	DEFINE;
 	UNARY;
+	ASSIGN;
+	
 }
 @header{
 	package columbia.plt.tt;
@@ -164,16 +171,16 @@ argDeclaration
 //@Author : Athresh
 
 declarationStatement
-	: type^ (WS*)! IDENT ';'
+	: t=type (WS*)! IDENT (WS*)! ';'   -> ^(DECLARE $t IDENT)
 	;
 
 definitionStatement
-	: type (WS*)! assignmentStmt 
+	: t=type (WS*)! IDENT (WS*)! ASSIGN  e=expr  ';' -> ^(DEFINE ^(DECLARE $t IDENT) $e)
 	;
 
 assignmentStmt
-	: IDENT ASSIGN^ expr ';'!
-	| memberAccessExpr ^ASSIGN expr ';'!
+	: id=IDENT (WS*)! ASSIGN  e = expr  ';'  -> ^(ASSIGN $id  $e )
+	| mae = memberAccessExpr (WS*)!  ASSIGN  e =expr ';' -> ^(ASSIGN $mae $e)
 	;
 
 type
@@ -184,6 +191,7 @@ type
 	| TIMEFRAMETYPE
 	| CALENDARTYPE
 	| TIMETYPE /* LRM was TimeEntity */
+	| BOOLEAN
 	;
 
 //Statement
@@ -212,41 +220,42 @@ block
 
 
 ifThenStatement
-	: IF '(' expr ')' block elseStatement? -> ^(IF expr block elseStatement)
+	: IF '(' expr ')' block elseStatement -> ^(IF expr block elseStatement)
 	;
 
 elseStatement
 	: ELSE block -> ^(ELSE block)
+	| -> ^(EMPTY)
 	;
 
 everyFromToByStatement
-	: EVERY 'Date' IDENT FROM dateOrIdent TO dateOrIdent BY timeframeOrIdent block -> ^(EVERYDATE ^('Date' IDENT) ^(FROM dateOrIdent) ^(TO dateOrIdent) ^(BY timeframeOrIdent) block)
+	: EVERY 'Date' IDENT FROM dateOrIdent TO dateOrIdent BY timeframeOrIdent block -> ^(EVERYDATE ^(DECLARE 'Date' IDENT) ^(FROM dateOrIdent) ^(TO dateOrIdent) ^(BY timeframeOrIdent) block)
 	;
 
 everyInStatement
 	//: EVERY 'Task' IDENT IN IDENT constraintOptions  block -> ^(EVERYTASK ^('Task' IDENT) ^(IN IDENT) ^(constraintOptions) block)
-	: EVERY 'Task' IDENT IN IDENT FROM dateOrIdent TO dateOrIdent ON expr block -> ^(EVERYTASK ^('Task' IDENT) ^(IN IDENT) ^(FROM dateOrIdent) ^(TO dateOrIdent) ^(ON expr) block)
-	| EVERY 'Task' IDENT IN IDENT FROM dateOrIdent TO dateOrIdent block -> ^(EVERYTASK ^('Task' IDENT)  ^(IN IDENT) ^(FROM dateOrIdent) ^(TO dateOrIdent) block)
-	| EVERY 'Task' IDENT IN IDENT ON expr block -> ^(EVERYTASK ^('Task' IDENT) ^(IN IDENT) ^(ON expr) block)
-	| EVERY 'Task' IDENT IN IDENT block -> ^(EVERYTASK ^('Task' IDENT)  ^(IN IDENT) block)
+	: EVERY 'Task' IDENT IN IDENT FROM dateOrIdent TO dateOrIdent ON expr block -> ^(EVERYTASK ^(DECLARE 'Task' IDENT) ^(IN ^(IDENT_TOKEN IDENT)) ^(FROM dateOrIdent) ^(TO dateOrIdent) ^(ON expr) block)
+	| EVERY 'Task' IDENT IN IDENT FROM dateOrIdent TO dateOrIdent block -> ^(EVERYTASK ^(DECLARE 'Task' IDENT)  ^(IN ^(IDENT_TOKEN IDENT)) ^(FROM dateOrIdent) ^(TO dateOrIdent) block)
+	| EVERY 'Task' IDENT IN IDENT ON expr block -> ^(EVERYTASK ^(DECLARE 'Task' IDENT) ^(IN ^(IDENT_TOKEN IDENT)) ^(ON expr) block)
+	| EVERY 'Task' IDENT IN IDENT block -> ^(EVERYTASK ^(DECLARE 'Task' IDENT)  ^(IN ^(IDENT_TOKEN IDENT)) block)
 	;
 	
 dateOrIdent
-	: IDENT^
-	| DATE_CONSTANT^	
+	: IDENT -> ^(IDENT_TOKEN IDENT)
+	| DATE_CONSTANT -> ^(DATE_CONSTANT_TOKEN DATE_CONSTANT)	
 	; 
 	
 timeframeOrIdent
-	: IDENT
-	| timeFrameConstant
+	: IDENT -> ^(IDENT_TOKEN IDENT)
+	| timeFrameConstant -> ^(TIMEFRAME_CONSTANT timeFrameConstant)
 	;
 
 breakStatement
-	: BREAK ';'
+	: BREAK ';'!
 	;
 
 continueStatement
-	: CONTINUE ';'
+	: CONTINUE ';'!
 	;
 
 exitStatement
@@ -254,7 +263,7 @@ exitStatement
 	;
 
 returnStatement
-	: 'return' expr? ';'
+	: 'return' expr? ';' -> ^(RETURN expr?)
 	;
 
 functionInvocationStatement
@@ -276,12 +285,18 @@ expressionList
 /* TODO: We should remove 'read' and 'print' they belong
  * to the [standard] library. */
 readStatement
-	: READ '(' STRING_CONSTANT ')' ';'
+	: readInvocation ';'! 
 	;
-print : PRINT '(' STRING_CONSTANT  ')' ';' -> ^(PRINT STRING_CONSTANT); 
+readInvocation
+	: READ '(' STRING_CONSTANT ')' -> ^(READ STRING_CONSTANT)
+	;
+
+print : PRINT '(' STRING_CONSTANT  ')' ';' -> ^(PRINT STRING_CONSTANT)
+      | PRINT '(' IDENT ')' ';' -> ^(PRINT ^(IDENT_TOKEN IDENT))
+      ; 
 
 timeFrameConstant
-	: NUMBER timeFrameSuffix
+	: NUMBER timeFrameSuffix ('+' NUMBER timeFrameSuffix)*
 	;
 
 // Arithmetic Expressions .. Jason
@@ -289,45 +304,45 @@ timeFrameConstant
 expr
 	: logicalExpr
 	| functionInvocation
+	| readInvocation
 	;
 
 logicalExpr
-	: booleanAndExpr (op=OR booleanAndExpr)*   -> ^(OP["booleanOrExpr"] booleanAndExpr+)
+	: booleanAndExpr (OR^ booleanAndExpr)*   
 	;
 
 booleanAndExpr
-	: equalityExpr (op=AND equalityExpr)*   -> ^(OP["booleanAndExpr"] equalityExpr+)
+	: equalityExpr (AND^ equalityExpr)*   
 	;
 
 equalityExpr
-	: relationalExpr (op=(EQUALS|NOTEQUALS) relationalExpr)*  -> ^(OP["equalityExpr"] relationalExpr+)
-	
+	: relationalExpr ((EQUALS^|NOTEQUALS^) relationalExpr)* 
 	;
 
 relationalExpr
-	: additiveExpr (op=(LT | LTEQ | GT | GTEQ) additiveExpr)* -> ^(OP["relationalExpr"] additiveExpr+)
+	: additiveExpr ((LT^|LTEQ^|GT^|GTEQ^) additiveExpr)* 
 	;
 
 additiveExpr
-	: multExpr (op=(PLUS | MINUS) multExpr)* -> ^(OP["additiveExpr"] multExpr+)
+	: multExpr ((PLUS^|MINUS^) multExpr)* 
 	;
 
 multExpr
-	: unaryExpr (op=(MULT | DIV | MOD) unaryExpr)* -> ^(OP["multExpr"] unaryExpr+)
+	: unaryExpr ((MULT^|DIV^|MOD^) unaryExpr)* 
 	;
 
 memberAccessExpr
-	:	IDENT DOT IDENT 		 -> ^(DOT IDENT IDENT)
+	:	IDENT (WS*)! DOT (WS*)! IDENT 	 -> ^(DOT IDENT IDENT)
 	;
 
 unaryExpr 
-	: NOT? primaryExpr    -> ^(UNARY NOT? primaryExpr)
+	: NOT? (WS*)! primaryExpr    -> ^(UNARY NOT? primaryExpr)
 	;
 
 primaryExpr  			
-	: exprInParentheses  			
+	: exprInParentheses 		
 	| constant				
-	| IDENT
+	| IDENT //-> ^(IDENT_TOKEN IDENT)
 	| memberAccessExpr
 	|	assignmentStmt
 	;
@@ -370,9 +385,9 @@ COMMENT
 		{ $channel = HIDDEN; }
 	;
 
-constant 
+constant
 	: STRING_CONSTANT
-	| DATE_CONSTANT
+	| DATE_CONSTANT -> ^(DATE_CONSTANT_TOKEN DATE_CONSTANT)  
 	| NUMBER
 	| timeFrameConstant
 	| timeEntityConstant
